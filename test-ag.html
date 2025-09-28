@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test AG Endpoint</title>
+</head>
+<body>
+    <h1>Test AG Endpoint</h1>
+    <input type="text" id="messageInput" placeholder="Enter your message" style="width: 300px; padding: 10px;">
+    <button onclick="sendMessage()" style="padding: 10px;">Send</button>
+    <div id="response" style="margin-top: 20px; padding: 10px; border: 1px solid #ccc; min-height: 100px;"></div>
+
+    <script>
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const responseDiv = document.getElementById('response');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            responseDiv.innerHTML = 'Sending...';
+            
+            try {
+                const response = await fetch('http://localhost:3010/ag', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message: message })
+                });
+                
+                const data = await response.json();
+                responseDiv.innerHTML = `<strong>Response:</strong><br>${data.reply}`;
+            } catch (error) {
+                responseDiv.innerHTML = `<strong>Error:</strong><br>${error.message}`;
+            }
+        }
+        
+        // Allow Enter key to send message
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
