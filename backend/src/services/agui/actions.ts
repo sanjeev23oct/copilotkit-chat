@@ -315,6 +315,199 @@ export class AGUIActionRegistry {
         }
       }
     });
+
+    // Pull data from PostgreSQL with natural language
+    this.registerAction({
+      id: 'pull_postgres_data',
+      name: 'Pull PostgreSQL Data',
+      description: 'Pull data from PostgreSQL database using SQL query or table name',
+      parameters: [
+        {
+          name: 'query',
+          type: 'string',
+          description: 'SQL SELECT query to execute (optional if tableName is provided)',
+          required: false
+        },
+        {
+          name: 'tableName',
+          type: 'string',
+          description: 'Name of the table to query (optional if query is provided)',
+          required: false
+        },
+        {
+          name: 'limit',
+          type: 'number',
+          description: 'Maximum number of rows to return',
+          default: 100
+        },
+        {
+          name: 'visualize',
+          type: 'boolean',
+          description: 'Whether to create a visualization of the data',
+          default: false
+        }
+      ],
+      handler: async (params) => {
+        try {
+          const { query, tableName, limit = 100, visualize = false } = params;
+
+          if (!query && !tableName) {
+            return {
+              success: false,
+              error: 'Either query or tableName must be provided'
+            };
+          }
+
+          let sqlQuery = query;
+          
+          // If tableName is provided, construct a simple SELECT query
+          if (!sqlQuery && tableName) {
+            const sanitizedTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+            sqlQuery = `SELECT * FROM ${sanitizedTableName} LIMIT ${limit}`;
+          }
+
+          // Execute the query
+          const result = await databaseService.executeQuery(sqlQuery);
+
+          if (result.rows.length === 0) {
+            return {
+              success: true,
+              message: 'Query executed successfully but returned no results',
+              data: []
+            };
+          }
+
+          // Create AGUI table
+          const headers = Object.keys(result.rows[0]);
+          const rows = result.rows.map(row => headers.map(header => {
+            const value = row[header];
+            // Format dates and complex objects
+            if (value instanceof Date) {
+              return value.toISOString();
+            } else if (typeof value === 'object' && value !== null) {
+              return JSON.stringify(value);
+            }
+            return value;
+          }));
+
+          const tableElement: AGUIElement = {
+            type: 'table',
+            id: `postgres_table_${Date.now()}`,
+            props: {
+              headers,
+              rows,
+              sortable: true,
+              filterable: true,
+              pagination: result.rows.length > 10 ? {
+                page: 1,
+                pageSize: 10,
+                total: result.rows.length
+              } : undefined
+            }
+          };
+
+          const aguiElements: AGUIElement[] = [tableElement];
+
+          // Add visualization if requested and data is suitable
+          if (visualize && result.rows.length > 0) {
+            // Try to find numeric columns for visualization
+            const numericColumns = headers.filter(header => {
+              const firstValue = result.rows[0][header];
+              return typeof firstValue === 'number' || !isNaN(Number(firstValue));
+            });
+
+            if (numericColumns.length > 0 && headers.length > 1) {
+              const labelColumn = headers[0];
+              const valueColumn = numericColumns[0];
+              
+              const labels = result.rows.slice(0, 10).map(row => String(row[labelColumn]));
+              const values = result.rows.slice(0, 10).map(row => Number(row[valueColumn]));
+
+              const chartElement: AGUIElement = {
+                type: 'chart',
+                id: `postgres_chart_${Date.now()}`,
+                props: {
+                  chartType: 'bar',
+                  data: {
+                    labels,
+                    datasets: [{
+                      label: valueColumn,
+                      data: values,
+                      backgroundColor: '#36A2EB'
+                    }]
+                  }
+                }
+              };
+
+              aguiElements.push(chartElement);
+            }
+          }
+
+          return {
+            success: true,
+            data: result.rows,
+            message: `Retrieved ${result.rowCount} row(s) from PostgreSQL`,
+            agui: aguiElements
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to pull data from PostgreSQL'
+          };
+        }
+      }
+    });
+
+    // List all available tables
+    this.registerAction({
+      id: 'list_postgres_tables',
+      name: 'List PostgreSQL Tables',
+      description: 'List all available tables in the PostgreSQL database',
+      parameters: [],
+      handler: async () => {
+        try {
+          const schema = await databaseService.getTableSchema();
+
+          // Get unique table names
+          const tableNames = [...new Set(schema.map(row => row.table_name))];
+
+          if (tableNames.length === 0) {
+            return {
+              success: true,
+              message: 'No tables found in the database',
+              data: []
+            };
+          }
+
+          // Create a card for each table
+          const cardElements: AGUIElement[] = tableNames.map(tableName => {
+            const tableColumns = schema.filter(row => row.table_name === tableName && row.column_name);
+            
+            return {
+              type: 'card',
+              id: `table_card_${tableName}`,
+              props: {
+                title: tableName,
+                subtitle: `${tableColumns.length} columns`,
+                content: `Table: ${tableName}\nColumns: ${tableColumns.map(c => c.column_name).join(', ')}`
+              }
+            };
+          });
+
+          return {
+            success: true,
+            data: tableNames,
+            message: `Found ${tableNames.length} table(s) in PostgreSQL database`,
+            agui: cardElements
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to list PostgreSQL tables'
+          };
+        }
+      }
+    });
   }
 }
 

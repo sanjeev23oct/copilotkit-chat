@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PostgreSQL Agent Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .input-group {
+            margin: 15px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea {
+            min-height: 100px;
+            font-family: monospace;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 10px 20px;
+            background-color: #e0e0e0;
+            border: none;
+            border-radius: 4px 4px 0 0;
+            cursor: pointer;
+        }
+        .tab.active {
+            background-color: white;
+            border-bottom: 2px solid #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <h1>🐘 PostgreSQL Agentic Tool Test</h1>
+    
+    <div class="container">
+        <h2>Quick Actions</h2>
+        <button onclick="listTables()">List All Tables</button>
+        <button onclick="getActions()">Get Available Actions</button>
+    </div>
+
+    <div class="container">
+        <h2>Pull Data from PostgreSQL</h2>
+        
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('table')">Query by Table</button>
+            <button class="tab" onclick="switchTab('query')">Custom SQL Query</button>
+        </div>
+
+        <div id="tableTab">
+            <div class="input-group">
+                <label for="tableName">Table Name:</label>
+                <input type="text" id="tableName" placeholder="e.g., users, conversations, messages">
+            </div>
+        </div>
+
+        <div id="queryTab" style="display: none;">
+            <div class="input-group">
+                <label for="sqlQuery">SQL Query (SELECT only):</label>
+                <textarea id="sqlQuery" placeholder="SELECT * FROM users WHERE created_at > '2024-01-01'"></textarea>
+            </div>
+        </div>
+
+        <div class="input-group">
+            <label for="limit">Limit (max rows):</label>
+            <input type="number" id="limit" value="100" min="1" max="1000">
+        </div>
+
+        <div class="input-group">
+            <label>
+                <input type="checkbox" id="visualize"> Create visualization
+            </label>
+        </div>
+
+        <button onclick="pullData()">Pull Data</button>
+    </div>
+
+    <div class="container">
+        <h2>Execute Custom Action</h2>
+        
+        <div class="input-group">
+            <label for="actionId">Action ID:</label>
+            <select id="actionId">
+                <option value="pull_postgres_data">pull_postgres_data</option>
+                <option value="list_postgres_tables">list_postgres_tables</option>
+                <option value="query_database">query_database</option>
+                <option value="get_table_schema">get_table_schema</option>
+                <option value="get_sample_data">get_sample_data</option>
+            </select>
+        </div>
+
+        <div class="input-group">
+            <label for="parameters">Parameters (JSON):</label>
+            <textarea id="parameters" placeholder='{"tableName": "users", "limit": 10}'>{}</textarea>
+        </div>
+
+        <button onclick="executeAction()">Execute Action</button>
+    </div>
+
+    <div class="container">
+        <h2>Result</h2>
+        <div id="result">No results yet. Try one of the actions above.</div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3010';
+        let currentTab = 'table';
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.getElementById('tableTab').style.display = tab === 'table' ? 'block' : 'none';
+            document.getElementById('queryTab').style.display = tab === 'query' ? 'block' : 'none';
+            
+            // Update tab styling
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        async function listTables() {
+            try {
+                showResult('Loading...', 'info');
+                const response = await fetch(`${API_URL}/api/postgres-agent/tables`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    let html = `<div class="success"><strong>✓ ${data.message}</strong></div>`;
+                    
+                    if (data.data && data.data.length > 0) {
+                        html += '<h3>Available Tables:</h3><ul>';
+                        data.data.forEach(table => {
+                            html += `<li><strong>${table}</strong></li>`;
+                        });
+                        html += '</ul>';
+                    }
+                    
+                    if (data.agui && data.agui.length > 0) {
+                        html += '<h3>Table Details:</h3>';
+                        data.agui.forEach(element => {
+                            if (element.type === 'card') {
+                                html += `<div style="border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 4px;">
+                                    <h4>${element.props.title}</h4>
+                                    <p><em>${element.props.subtitle}</em></p>
+                                    <pre>${element.props.content}</pre>
+                                </div>`;
+                            }
+                        });
+                    }
+                    
+                    document.getElementById('result').innerHTML = html;
+                } else {
+                    showResult(`Error: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                showResult(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function getActions() {
+            try {
+                showResult('Loading...', 'info');
+                const response = await fetch(`${API_URL}/api/postgres-agent/actions`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    let html = '<div class="success"><strong>✓ Available PostgreSQL Actions</strong></div>';
+                    html += '<table><tr><th>Action ID</th><th>Name</th><th>Description</th><th>Parameters</th></tr>';
+                    
+                    data.actions.forEach(action => {
+                        const params = action.parameters.map(p => 
+                            `${p.name} (${p.type})${p.required ? ' *' : ''}`
+                        ).join(', ');
+                        
+                        html += `<tr>
+                            <td><code>${action.id}</code></td>
+                            <td>${action.name}</td>
+                            <td>${action.description}</td>
+                            <td>${params || 'None'}</td>
+                        </tr>`;
+                    });
+                    
+                    html += '</table>';
+                    document.getElementById('result').innerHTML = html;
+                } else {
+                    showResult(`Error: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                showResult(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function pullData() {
+            try {
+                showResult('Pulling data...', 'info');
+                
+                const payload = {
+                    limit: parseInt(document.getElementById('limit').value) || 100,
+                    visualize: document.getElementById('visualize').checked
+                };
+
+                if (currentTab === 'table') {
+                    payload.tableName = document.getElementById('tableName').value.trim();
+                    if (!payload.tableName) {
+                        showResult('Error: Please enter a table name', 'error');
+                        return;
+                    }
+                } else {
+                    payload.query = document.getElementById('sqlQuery').value.trim();
+                    if (!payload.query) {
+                        showResult('Error: Please enter a SQL query', 'error');
+                        return;
+                    }
+                }
+
+                const response = await fetch(`${API_URL}/api/postgres-agent/pull`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+                displayResult(data);
+            } catch (error) {
+                showResult(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function executeAction() {
+            try {
+                showResult('Executing action...', 'info');
+                
+                const actionId = document.getElementById('actionId').value;
+                const parametersText = document.getElementById('parameters').value.trim();
+                
+                let parameters = {};
+                if (parametersText) {
+                    try {
+                        parameters = JSON.parse(parametersText);
+                    } catch (e) {
+                        showResult('Error: Invalid JSON in parameters', 'error');
+                        return;
+                    }
+                }
+
+                const response = await fetch(`${API_URL}/api/postgres-agent/action`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ actionId, parameters })
+                });
+
+                const data = await response.json();
+                displayResult(data);
+            } catch (error) {
+                showResult(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        function displayResult(data) {
+            let html = '';
+            
+            if (data.success) {
+                html += `<div class="success"><strong>✓ ${data.message || 'Success'}</strong></div>`;
+                
+                if (data.agui && data.agui.length > 0) {
+                    data.agui.forEach(element => {
+                        if (element.type === 'table') {
+                            html += renderTable(element);
+                        } else if (element.type === 'card') {
+                            html += renderCard(element);
+                        }
+                    });
+                }
+                
+                if (data.data) {
+                    html += '<details><summary>View Raw JSON Data</summary>';
+                    html += `<pre>${JSON.stringify(data.data, null, 2)}</pre>`;
+                    html += '</details>';
+                }
+            } else {
+                html += `<div class="error"><strong>✗ Error</strong><br>${data.error}</div>`;
+            }
+            
+            document.getElementById('result').innerHTML = html;
+        }
+
+        function renderTable(element) {
+            const { headers, rows } = element.props;
+            let html = '<table><tr>';
+            
+            headers.forEach(header => {
+                html += `<th>${header}</th>`;
+            });
+            html += '</tr>';
+            
+            rows.forEach(row => {
+                html += '<tr>';
+                row.forEach(cell => {
+                    html += `<td>${cell !== null && cell !== undefined ? cell : '-'}</td>`;
+                });
+                html += '</tr>';
+            });
+            
+            html += '</table>';
+            return html;
+        }
+
+        function renderCard(element) {
+            const { title, subtitle, content } = element.props;
+            return `<div style="border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 4px;">
+                ${title ? `<h4>${title}</h4>` : ''}
+                ${subtitle ? `<p><em>${subtitle}</em></p>` : ''}
+                ${content ? `<pre>${content}</pre>` : ''}
+            </div>`;
+        }
+
+        function showResult(message, type) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = type;
+            resultDiv.textContent = message;
+        }
+    </script>
+</body>
+</html>

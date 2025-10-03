@@ -8,6 +8,7 @@ import databaseRouter from './routes/database';
 import chatRouter from './routes/chat';
 import agRouter from './routes/ag';
 import aguiStreamRouter from './routes/agui-stream';
+import postgresAgentRouter from './routes/postgres-agent';
 import logger from './utils/logger';
 
 // Load environment variables
@@ -42,6 +43,7 @@ app.use('/api/database', databaseRouter);
 app.use('/api/chat', chatRouter);
 app.use('/ag', agRouter);
 app.use('/custom-agent', aguiStreamRouter);
+app.use('/api/postgres-agent', postgresAgentRouter);
 
 // Basic route
 app.get('/', (_req, res) => {
@@ -53,6 +55,7 @@ app.get('/', (_req, res) => {
       copilotkit: '/api/copilotkit',
       database: '/api/database',
       chat: '/api/chat',
+      postgresAgent: '/api/postgres-agent',
       health: '/api/health'
     }
   });

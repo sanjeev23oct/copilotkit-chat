@@ -9,6 +9,7 @@ A modern AI chat application built with React, Node.js, and CopilotKit, featurin
 - **CopilotKit Integration**: Enhanced chat interface with built-in AI capabilities
 - **AG-UI Protocol**: Interactive elements like buttons, tables, charts, and forms
 - **Real-time Streaming**: Live response streaming for better user experience
+- **PostgreSQL Agentic Tool**: Pull and visualize data from PostgreSQL databases
 
 ### 🎨 Frontend
 - **React 18** with TypeScript for type safety
@@ -101,6 +102,14 @@ A modern AI chat application built with React, Node.js, and CopilotKit, featurin
 - `POST /api/database/query` - Execute database queries
 - `GET /api/database/schema` - Get database schema
 
+### PostgreSQL Agent API
+- `GET /api/postgres-agent/tables` - List all available tables
+- `POST /api/postgres-agent/pull` - Pull data from PostgreSQL
+- `POST /api/postgres-agent/action` - Execute agentic actions
+- `GET /api/postgres-agent/actions` - Get available actions
+
+See [POSTGRES_AGENT_README.md](POSTGRES_AGENT_README.md) for detailed documentation.
+
 ## Configuration
 
 ### Environment Variables
@@ -179,6 +188,35 @@ npm run preview      # Preview production build
 npm run test         # Run Vitest tests
 npm run lint         # Run ESLint
 ```
+
+## PostgreSQL Agentic Tool
+
+A powerful tool for pulling and visualizing data from PostgreSQL databases with an intuitive API and UI.
+
+### Quick Start
+```bash
+# Setup database with sample data
+cd backend
+npm run setup-db
+
+# Start backend
+npm run dev
+
+# Test the API
+curl http://localhost:3010/api/postgres-agent/tables
+```
+
+### Features
+- 🔍 Query by table name or custom SQL
+- 📊 Automatic data visualization
+- 🎨 Rich UI elements (tables, cards, charts)
+- 🔒 SQL injection protection
+- 🚀 RESTful API endpoints
+
+### Documentation
+- **Quick Start**: [POSTGRES_AGENT_QUICKSTART.md](POSTGRES_AGENT_QUICKSTART.md)
+- **Full Documentation**: [POSTGRES_AGENT_README.md](POSTGRES_AGENT_README.md)
+- **Test Interface**: Open `test-postgres-agent.html` in your browser
 
 ## Features in Detail
 
