@@ -241,7 +241,7 @@ export class AGUIActionRegistry {
     this.registerAction({
       id: 'create_chart',
       name: 'Create Chart',
-      description: 'Create a chart from data',
+      description: 'Create a chart from data with support for multiple datasets and chart types',
       parameters: [
         {
           name: 'data',
@@ -252,25 +252,31 @@ export class AGUIActionRegistry {
         {
           name: 'chartType',
           type: 'string',
-          description: 'Type of chart (bar, line, pie, doughnut)',
+          description: 'Type of chart (bar, line, pie, doughnut, area)',
           default: 'bar'
         },
         {
           name: 'xField',
           type: 'string',
-          description: 'Field to use for X-axis',
+          description: 'Field to use for X-axis/labels',
           required: true
         },
         {
-          name: 'yField',
-          type: 'string',
-          description: 'Field to use for Y-axis',
+          name: 'yFields',
+          type: 'array',
+          description: 'Fields to use for Y-axis (can be multiple for multi-dataset charts)',
           required: true
+        },
+        {
+          name: 'title',
+          type: 'string',
+          description: 'Chart title',
+          required: false
         }
       ],
       handler: async (params) => {
         try {
-          const { data, chartType = 'bar', xField, yField } = params;
+          const { data, chartType = 'bar', xField, yFields, title } = params;
 
           if (!Array.isArray(data) || data.length === 0) {
             return {
@@ -279,32 +285,55 @@ export class AGUIActionRegistry {
             };
           }
 
-          const labels = data.map(item => item[xField]);
-          const values = data.map(item => item[yField]);
+          const labels = data.map(item => String(item[xField]));
+          const yFieldsArray = Array.isArray(yFields) ? yFields : [yFields];
+
+          const colors = [
+            '#36A2EB', '#FF6384', '#4BC0C0', '#FFCE56', '#9966FF',
+            '#FF9F40', '#46BFBD', '#FDB45C', '#949FB1', '#4D5360'
+          ];
+
+          const datasets = yFieldsArray.map((field, index) => ({
+            label: field,
+            data: data.map(item => Number(item[field]) || 0),
+            backgroundColor: chartType === 'pie' || chartType === 'doughnut'
+              ? colors
+              : colors[index % colors.length],
+            borderColor: colors[index % colors.length],
+            borderWidth: chartType === 'line' || chartType === 'area' ? 2 : 1,
+            tension: chartType === 'line' || chartType === 'area' ? 0.4 : 0,
+            fill: chartType === 'area'
+          }));
 
           const chartElement: AGUIElement = {
             type: 'chart',
             id: `chart_${Date.now()}`,
             props: {
-              chartType,
+              chartType: chartType === 'area' ? 'line' : chartType,
               data: {
                 labels,
-                datasets: [{
-                  label: yField,
-                  data: values,
-                  backgroundColor: [
-                    '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
-                    '#FF9F40', '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384'
-                  ]
-                }]
+                datasets
+              },
+              options: {
+                responsive: true,
+                plugins: {
+                  title: {
+                    display: !!title,
+                    text: title
+                  },
+                  legend: {
+                    display: true,
+                    position: 'top'
+                  }
+                }
               }
             }
           };
 
           return {
             success: true,
-            data: { labels, values },
-            message: `Created ${chartType} chart with ${data.length} data points`,
+            data: { labels, datasets: datasets.map(d => ({ label: d.label, data: d.data })) },
+            message: `Created ${chartType} chart with ${data.length} data points and ${datasets.length} dataset(s)`,
             agui: [chartElement]
           };
         } catch (error) {

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import ChartRenderer from './ChartRenderer';
 
 interface AGUIElement {
   type: string;
@@ -153,6 +154,21 @@ export default function PostgresAgent() {
     );
   };
 
+  const renderChart = (element: AGUIElement) => {
+    const { chartType, data, options } = element.props;
+    
+    return (
+      <div className="mt-4">
+        <ChartRenderer
+          chartType={chartType}
+          data={data}
+          options={options}
+          title={`Data Visualization - ${chartType.charAt(0).toUpperCase() + chartType.slice(1)} Chart`}
+        />
+      </div>
+    );
+  };
+
   const renderAGUI = (elements: AGUIElement[]) => {
     return elements.map((element) => {
       switch (element.type) {
@@ -160,6 +176,8 @@ export default function PostgresAgent() {
           return <div key={element.id}>{renderTable(element)}</div>;
         case 'card':
           return <div key={element.id}>{renderCard(element)}</div>;
+        case 'chart':
+          return <div key={element.id}>{renderChart(element)}</div>;
         default:
           return <div key={element.id}>Unsupported element type: {element.type}</div>;
       }

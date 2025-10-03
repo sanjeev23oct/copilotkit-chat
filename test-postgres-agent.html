@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PostgreSQL Agent Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -403,6 +404,8 @@
                             html += renderTable(element);
                         } else if (element.type === 'card') {
                             html += renderCard(element);
+                        } else if (element.type === 'chart') {
+                            html += renderChart(element);
                         }
                     });
                 }
@@ -446,6 +449,40 @@
                 ${title ? `<h4>${title}</h4>` : ''}
                 ${subtitle ? `<p><em>${subtitle}</em></p>` : ''}
                 ${content ? `<pre>${content}</pre>` : ''}
+            </div>`;
+        }
+
+        function renderChart(element) {
+            const { chartType, data, options } = element.props;
+            const canvasId = `chart_${element.id}_${Date.now()}`;
+            
+            // Create canvas element
+            setTimeout(() => {
+                const canvas = document.getElementById(canvasId);
+                if (canvas && window.Chart) {
+                    new Chart(canvas, {
+                        type: chartType,
+                        data: data,
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: true,
+                            plugins: {
+                                legend: {
+                                    position: 'top',
+                                },
+                                title: {
+                                    display: true,
+                                    text: options?.plugins?.title?.text || `${chartType.charAt(0).toUpperCase() + chartType.slice(1)} Chart`
+                                }
+                            },
+                            ...options
+                        }
+                    });
+                }
+            }, 100);
+            
+            return `<div style="background: white; padding: 20px; margin: 15px 0; border-radius: 8px; border: 1px solid #ddd; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <canvas id="${canvasId}" style="max-height: 400px;"></canvas>
             </div>`;
         }
 
