@@ -23,7 +23,7 @@ export default function PostgresAgent() {
   const [result, setResult] = useState<ActionResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [tables, setTables] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'query' | 'table'>('table');
+  const [activeTab, setActiveTab] = useState<'query' | 'table' | 'nl'>('nl');
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3010';
 
@@ -48,6 +48,32 @@ export default function PostgresAgent() {
       setLoading(true);
       setResult(null);
 
+      // Natural language query
+      if (activeTab === 'nl') {
+        if (!query.trim()) {
+          alert('Please enter a natural language query');
+          setLoading(false);
+          return;
+        }
+
+        const response = await fetch(`${API_URL}/api/postgres-agent/nl-query`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query: query.trim(),
+            visualize
+          }),
+        });
+
+        const data = await response.json();
+        setResult(data);
+        setLoading(false);
+        return;
+      }
+
+      // Regular query or table
       const payload: any = {
         limit,
         visualize
@@ -178,6 +204,16 @@ export default function PostgresAgent() {
         <div className="mb-6">
           <div className="flex gap-4 mb-4">
             <button
+              onClick={() => setActiveTab('nl')}
+              className={`px-4 py-2 rounded ${
+                activeTab === 'nl'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              🤖 Natural Language
+            </button>
+            <button
               onClick={() => setActiveTab('table')}
               className={`px-4 py-2 rounded ${
                 activeTab === 'table'
@@ -199,7 +235,23 @@ export default function PostgresAgent() {
             </button>
           </div>
 
-          {activeTab === 'table' ? (
+          {activeTab === 'nl' ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Ask in Plain English 🗣️
+              </label>
+              <textarea
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="e.g., Show me all users from New York, or Get the top 5 products by price"
+                rows={3}
+                className="w-full px-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="mt-2 text-sm text-gray-500">
+                💡 Examples: "Show me users older than 30", "Count products by category", "Find orders from last week"
+              </p>
+            </div>
+          ) : activeTab === 'table' ? (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Table Name
@@ -261,7 +313,7 @@ export default function PostgresAgent() {
             disabled={loading}
             className="mt-4 bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600 disabled:bg-gray-400"
           >
-            {loading ? 'Pulling Data...' : 'Pull Data'}
+            {loading ? (activeTab === 'nl' ? 'Processing...' : 'Pulling Data...') : (activeTab === 'nl' ? '🤖 Ask AI' : 'Pull Data')}
           </button>
         </div>
 
@@ -271,6 +323,24 @@ export default function PostgresAgent() {
               <div>
                 <div className="bg-green-50 border border-green-200 rounded p-4 mb-4">
                   <p className="text-green-800 font-semibold">✓ {result.message}</p>
+                  {(result as any).sql && (
+                    <div className="mt-2">
+                      <p className="text-sm text-gray-600 font-semibold">Generated SQL:</p>
+                      <pre className="mt-1 p-2 bg-gray-100 rounded text-xs overflow-x-auto">
+                        {(result as any).sql}
+                      </pre>
+                      {(result as any).explanation && (
+                        <p className="mt-2 text-sm text-gray-600">
+                          <strong>Explanation:</strong> {(result as any).explanation}
+                        </p>
+                      )}
+                      {(result as any).confidence && (
+                        <p className="mt-1 text-sm text-gray-600">
+                          <strong>Confidence:</strong> {Math.round((result as any).confidence * 100)}%
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
                 
                 {result.agui && result.agui.length > 0 && (

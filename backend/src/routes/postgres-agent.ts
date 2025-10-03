@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { aguiActionRegistry } from '../services/agui/actions';
+import { llmService } from '../services/llm';
+import { databaseService } from '../services/database';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -96,6 +98,131 @@ router.get('/actions', async (_req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error('Error fetching PostgreSQL actions:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// Natural language query endpoint
+router.post('/nl-query', async (req: Request, res: Response) => {
+  try {
+    const { query, tableHints, visualize } = req.body;
+
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'query (natural language) is required'
+      });
+    }
+
+    logger.info('Processing natural language query:', { query, tableHints });
+
+    // Convert natural language to SQL
+    const { sql, explanation, confidence } = await llmService.convertNaturalLanguageToSQL(
+      query,
+      tableHints
+    );
+
+    if (!sql) {
+      return res.status(400).json({
+        success: false,
+        error: 'Could not generate SQL query from natural language'
+      });
+    }
+
+    logger.info('Generated SQL:', { sql, confidence });
+
+    // Execute the SQL query
+    const result = await databaseService.executeQuery(sql);
+
+    if (result.rows.length === 0) {
+      return res.json({
+        success: true,
+        data: [],
+        sql,
+        explanation,
+        confidence,
+        message: 'Query executed successfully but returned no results',
+        naturalLanguageQuery: query
+      });
+    }
+
+    // Create AGUI table
+    const headers = Object.keys(result.rows[0]);
+    const rows = result.rows.map(row => headers.map(header => {
+      const value = row[header];
+      if (value instanceof Date) {
+        return value.toISOString();
+      } else if (typeof value === 'object' && value !== null) {
+        return JSON.stringify(value);
+      }
+      return value;
+    }));
+
+    const aguiElements: any[] = [
+      {
+        type: 'table',
+        id: `nl_query_table_${Date.now()}`,
+        props: {
+          headers,
+          rows,
+          sortable: true,
+          filterable: true,
+          pagination: result.rows.length > 10 ? {
+            page: 1,
+            pageSize: 10,
+            total: result.rows.length
+          } : undefined
+        }
+      }
+    ];
+
+    // Add visualization if requested and data is suitable
+    if (visualize && result.rows.length > 0) {
+      const numericColumns = headers.filter(header => {
+        const firstValue = result.rows[0][header];
+        return typeof firstValue === 'number' || !isNaN(Number(firstValue));
+      });
+
+      if (numericColumns.length > 0 && headers.length > 1) {
+        const labelColumn = headers[0];
+        const valueColumn = numericColumns[0];
+        
+        const labels = result.rows.slice(0, 10).map(row => String(row[labelColumn]));
+        const values = result.rows.slice(0, 10).map(row => Number(row[valueColumn]));
+
+        aguiElements.push({
+          type: 'chart',
+          id: `nl_query_chart_${Date.now()}`,
+          props: {
+            chartType: 'bar',
+            data: {
+              labels,
+              datasets: [{
+                label: valueColumn,
+                data: values,
+                backgroundColor: '#36A2EB'
+              }]
+            }
+          }
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      data: result.rows,
+      sql,
+      explanation,
+      confidence,
+      message: `Retrieved ${result.rowCount} row(s) from PostgreSQL`,
+      naturalLanguageQuery: query,
+      agui: aguiElements
+    });
+  } catch (error) {
+    logger.error('Natural language query error:', error);
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Internal server error'

@@ -508,6 +508,57 @@ export class AGUIActionRegistry {
         }
       }
     });
+
+    // Natural language query action
+    this.registerAction({
+      id: 'nl_query_postgres',
+      name: 'Natural Language Query',
+      description: 'Query PostgreSQL database using natural language (converts to SQL automatically)',
+      parameters: [
+        {
+          name: 'query',
+          type: 'string',
+          description: 'Natural language query (e.g., "show me all users from New York")',
+          required: true
+        },
+        {
+          name: 'tableHints',
+          type: 'array',
+          description: 'Optional table names to focus on',
+          required: false
+        },
+        {
+          name: 'visualize',
+          type: 'boolean',
+          description: 'Whether to create a visualization of the data',
+          default: false
+        }
+      ],
+      handler: async (params) => {
+        try {
+          const { query } = params;
+
+          if (!query) {
+            return {
+              success: false,
+              error: 'Natural language query is required'
+            };
+          }
+
+          // This would need to import llmService, but to avoid circular dependencies,
+          // we'll note that this action is better called via the API endpoint
+          return {
+            success: false,
+            error: 'Please use the /api/postgres-agent/nl-query endpoint for natural language queries'
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to process natural language query'
+          };
+        }
+      }
+    });
   }
 }
 
