@@ -105,6 +105,61 @@ router.get('/actions', async (_req: Request, res: Response) => {
   }
 });
 
+// Get current model info
+router.get('/model-info', async (_req: Request, res: Response) => {
+  try {
+    const modelInfo = llmService.getModelInfo();
+    return res.json({
+      success: true,
+      ...modelInfo,
+      message: `Currently using ${modelInfo.provider} with model ${modelInfo.model}`
+    });
+  } catch (error) {
+    logger.error('Error getting model info:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// Test LLM connection
+router.get('/test-llm', async (_req: Request, res: Response) => {
+  try {
+    logger.info('Testing LLM connection...');
+    
+    const { unifiedLLMService } = await import('../services/llm/unified');
+    
+    const testResponse = await unifiedLLMService.chat(
+      [
+        { role: 'user', content: 'Say "Hello, I am working!" in exactly those words.' }
+      ],
+      { temperature: 0, max_tokens: 50 }
+    );
+
+    const content = testResponse.choices[0]?.message?.content;
+    
+    return res.json({
+      success: true,
+      message: 'LLM connection successful',
+      provider: unifiedLLMService.getModelInfo().provider,
+      model: unifiedLLMService.getModelInfo().model,
+      testResponse: content,
+    });
+  } catch (error: any) {
+    logger.error('LLM test failed:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+      details: {
+        status: error.status,
+        code: error.code,
+        type: error.type,
+      }
+    });
+  }
+});
+
 // Natural language query endpoint
 router.post('/nl-query', async (req: Request, res: Response) => {
   try {
