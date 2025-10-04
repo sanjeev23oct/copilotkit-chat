@@ -117,8 +117,16 @@ export class UnifiedLLMService {
   async chat(messages: any[], options?: any) {
     try {
       logger.info(`Calling LLM: ${this.provider} - ${this.model}`);
+      const startTime = Date.now();
 
-      const response = await this.client.chat.completions.create({
+      // Set timeout based on provider (on-prem needs more time)
+      const timeout = this.provider === 'onprem' || this.provider === 'custom' ? 60000 : 30000;
+      
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`LLM request timeout after ${timeout/1000}s`)), timeout);
+      });
+
+      const chatPromise = this.client.chat.completions.create({
         model: this.model,
         messages,
         temperature: options?.temperature ?? 0.1,
@@ -126,7 +134,10 @@ export class UnifiedLLMService {
         stream: false,
       });
 
-      logger.info(`LLM response received successfully`);
+      const response = await Promise.race([chatPromise, timeoutPromise]) as any;
+      
+      const duration = Date.now() - startTime;
+      logger.info(`LLM response received successfully in ${duration}ms`);
       return response;
     } catch (error: any) {
       logger.error(`LLM chat error (${this.provider} - ${this.model}):`, {

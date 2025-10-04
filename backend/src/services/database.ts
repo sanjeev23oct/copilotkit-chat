@@ -13,7 +13,8 @@ export class DatabaseService {
       password: process.env.DB_PASSWORD || 'password',
       max: 20,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+      connectionTimeoutMillis: 10000, // Increased from 2s to 10s for on-prem LLM
+      statement_timeout: 60000, // 60 second query timeout
     });
 
     this.pool.on('error', (err) => {
