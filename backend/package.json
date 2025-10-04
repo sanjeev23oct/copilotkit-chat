@@ -8,6 +8,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "setup-db": "ts-node src/scripts/setup-sample-db.ts",
+    "setup-complex-db": "ts-node src/scripts/setup-complex-db.ts",
+    "setup-large-db": "ts-node src/scripts/setup-large-db.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint src/**/*.ts",

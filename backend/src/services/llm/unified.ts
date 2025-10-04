@@ -180,12 +180,19 @@ ${schemaInfo}
 
 CRITICAL RULES:
 1. Only generate SELECT queries for security
-2. Use proper PostgreSQL syntax
-3. Include appropriate JOINs when needed
-4. Use LIMIT for large result sets
-5. Handle case-insensitive searches with ILIKE
-6. ALWAYS return ONLY valid JSON - no markdown, no code blocks, no extra text
-7. The SQL must be a single line without line breaks
+2. Use proper PostgreSQL syntax with correct column names from the schema above
+3. **VERIFY COLUMN NAMES**: Always use exact column names from the schema (e.g., order_items has "unit_price", not "price")
+4. **USE VIEWS WHEN AVAILABLE**: If a view exists that matches the query (like product_sales_summary), use it instead of complex JOINs
+5. Include appropriate JOINs when needed, using consistent table aliases
+6. Use LIMIT for large result sets (default 100 if not specified)
+7. Handle case-insensitive searches with ILIKE
+8. ALWAYS return ONLY valid JSON - no markdown, no code blocks, no extra text
+9. The SQL must be a single line without line breaks
+10. **GROUP BY RULE**: When using aggregate functions (SUM, AVG, COUNT, MAX, MIN), ALL non-aggregated columns in SELECT must appear in GROUP BY clause
+    - Example: SELECT p.product_name, p.units_in_stock, SUM(oi.quantity) FROM products p JOIN order_items oi ... GROUP BY p.product_id, p.product_name, p.units_in_stock
+    - Always include the primary key in GROUP BY for best practice
+11. Use LEFT JOIN when you want all records from the main table even if there are no matches
+12. For aggregations with multiple tables, group by the primary key and all non-aggregated columns
 
 RESPONSE FORMAT (return ONLY this JSON, nothing else):
 {
@@ -261,8 +268,14 @@ ${tableHints?.length ? `Focus on these tables: ${tableHints.join(', ')}` : ''}`;
 
   private formatSchemaForPrompt(schema: any[]): string {
     const tables = new Map<string, any[]>();
+    const views = new Set<string>();
 
     schema.forEach((row) => {
+      // Track views separately
+      if (row.table_type === 'VIEW') {
+        views.add(row.table_name);
+      }
+      
       if (!tables.has(row.table_name)) {
         tables.set(row.table_name, []);
       }
@@ -277,7 +290,25 @@ ${tableHints?.length ? `Focus on these tables: ${tableHints.join(', ')}` : ''}`;
     });
 
     let schemaText = '';
+    
+    // List views first if any exist
+    if (views.size > 0) {
+      schemaText += '=== AVAILABLE VIEWS (Pre-aggregated data) ===\n';
+      views.forEach(viewName => {
+        schemaText += `View: ${viewName}\n`;
+        const columns = tables.get(viewName) || [];
+        columns.forEach((col) => {
+          schemaText += `  - ${col.column} (${col.type})\n`;
+        });
+        schemaText += '\n';
+      });
+      schemaText += '=== TABLES ===\n';
+    }
+    
     tables.forEach((columns, tableName) => {
+      // Skip views in table section
+      if (views.has(tableName)) return;
+      
       schemaText += `Table: ${tableName}\n`;
       columns.forEach((col) => {
         schemaText += `  - ${col.column} (${col.type})${col.nullable ? ' NULL' : ' NOT NULL'}\n`;
