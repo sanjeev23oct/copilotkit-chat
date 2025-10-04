@@ -314,28 +314,38 @@ ${tableHints?.length ? `Focus on these tables: ${tableHints.join(', ')}` : ''}`;
 
       // Prepare data summary
       const rowCount = data.length;
-      const columns = Object.keys(data[0]);
       const sampleRows = data.slice(0, 3);
 
-      const systemPrompt = `You are a data analyst assistant. Explain query results in clear, natural language.
+      const systemPrompt = `You are a data analyst. Explain query results clearly and concisely.
 
-RULES:
-1. Write in a conversational, easy-to-understand style
-2. Highlight key insights and patterns
-3. Use bullet points for multiple items
-4. Include specific numbers and statistics
-5. Keep it concise but informative (2-4 paragraphs max)
-6. Don't mention SQL or technical details unless relevant
-7. Focus on what the data means, not how it was retrieved`;
+FORMAT RULES:
+1. Start with a brief overview sentence
+2. Use markdown formatting:
+   - **Bold** for emphasis on key metrics
+   - Bullet points with "-" (not "*")
+   - Line breaks between sections
+3. Structure: Overview → Key Findings (3-5 bullets) → Notable Insight
+4. Include specific numbers with context
+5. Keep it under 150 words
+6. No technical jargon
 
-      const userPrompt = `The user asked: "${naturalLanguageQuery}"
+EXAMPLE:
+Found 50 products with sales data.
 
-The query returned ${rowCount} record(s) with these columns: ${columns.join(', ')}
+Key findings:
+- **Top performer**: Product A generated $45,200 in revenue from 320 sales
+- **Highest rated**: Product B has 4.8/5 stars with strong customer satisfaction
+- **Low stock alert**: Product C only has 5 units remaining despite high demand
 
-Here are the first few results:
+The data shows strong performance across premium products, with customer ratings correlating to higher revenue.`;
+
+      const userPrompt = `User asked: "${naturalLanguageQuery}"
+
+Results: ${rowCount} records
+Sample data (first 3):
 ${JSON.stringify(sampleRows, null, 2)}
 
-Please provide a natural language summary of these results that answers the user's question.`;
+Provide a clear, formatted summary.`;
 
       const response = await this.chat(
         [

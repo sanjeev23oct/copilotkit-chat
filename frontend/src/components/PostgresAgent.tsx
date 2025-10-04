@@ -392,9 +392,44 @@ export default function PostgresAgent() {
                     {/* Summary Tab */}
                     {resultViewTab === 'summary' && (result as any).summary && (
                       <div className="bg-white border border-gray-200 rounded-lg p-6">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Analysis</h3>
-                        <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap">
-                          {(result as any).summary}
+                        <h3 className="text-lg font-semibold text-gray-800 mb-4">📊 Analysis</h3>
+                        <div className="text-gray-700 leading-relaxed space-y-3">
+                          {(result as any).summary.split('\n').map((line: string, idx: number) => {
+                            // Empty line
+                            if (!line.trim()) return null;
+                            
+                            // Bullet point
+                            if (line.trim().startsWith('-')) {
+                              const text = line.trim().substring(1).trim();
+                              return (
+                                <div key={idx} className="flex items-start gap-2 ml-2">
+                                  <span className="text-blue-500 mt-1">•</span>
+                                  <span className="flex-1">
+                                    {text.split(/(\*\*.*?\*\*)/).map((part, i) => 
+                                      part.startsWith('**') && part.endsWith('**') ? (
+                                        <strong key={i} className="font-semibold text-gray-900">
+                                          {part.slice(2, -2)}
+                                        </strong>
+                                      ) : part
+                                    )}
+                                  </span>
+                                </div>
+                              );
+                            }
+                            
+                            // Regular paragraph
+                            return (
+                              <p key={idx} className="text-gray-700">
+                                {line.split(/(\*\*.*?\*\*)/).map((part, i) => 
+                                  part.startsWith('**') && part.endsWith('**') ? (
+                                    <strong key={i} className="font-semibold text-gray-900">
+                                      {part.slice(2, -2)}
+                                    </strong>
+                                  ) : part
+                                )}
+                              </p>
+                            );
+                          })}
                         </div>
                         
                         {(result as any).sql && (
