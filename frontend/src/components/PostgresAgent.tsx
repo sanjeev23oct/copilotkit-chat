@@ -341,6 +341,11 @@ export default function PostgresAgent() {
               <div>
                 <div className="bg-green-50 border border-green-200 rounded p-4 mb-4">
                   <p className="text-green-800 font-semibold">✓ {result.message}</p>
+                  {(result as any).model && (
+                    <p className="mt-1 text-xs text-gray-500">
+                      🤖 Model: {(result as any).model.provider} / {(result as any).model.name}
+                    </p>
+                  )}
                   {(result as any).sql && (
                     <div className="mt-2">
                       <p className="text-sm text-gray-600 font-semibold">Generated SQL:</p>

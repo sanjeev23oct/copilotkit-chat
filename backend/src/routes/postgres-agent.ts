@@ -193,6 +193,8 @@ router.post('/nl-query', async (req: Request, res: Response) => {
     const result = await databaseService.executeQuery(sql);
 
     if (result.rows.length === 0) {
+      const modelInfo = llmService.getModelInfo();
+      
       return res.json({
         success: true,
         data: [],
@@ -200,7 +202,11 @@ router.post('/nl-query', async (req: Request, res: Response) => {
         explanation,
         confidence,
         message: 'Query executed successfully but returned no results',
-        naturalLanguageQuery: query
+        naturalLanguageQuery: query,
+        model: {
+          provider: modelInfo.provider,
+          name: modelInfo.model
+        }
       });
     }
 
@@ -266,6 +272,8 @@ router.post('/nl-query', async (req: Request, res: Response) => {
       }
     }
 
+    const modelInfo = llmService.getModelInfo();
+    
     return res.json({
       success: true,
       data: result.rows,
@@ -274,6 +282,10 @@ router.post('/nl-query', async (req: Request, res: Response) => {
       confidence,
       message: `Retrieved ${result.rowCount} row(s) from PostgreSQL`,
       naturalLanguageQuery: query,
+      model: {
+        provider: modelInfo.provider,
+        name: modelInfo.model
+      },
       agui: aguiElements
     });
   } catch (error) {
