@@ -272,6 +272,13 @@ router.post('/nl-query', async (req: Request, res: Response) => {
       }
     }
 
+    // Generate natural language summary
+    const { unifiedLLMService } = await import('../services/llm/unified');
+    const summary = await unifiedLLMService.generateDataSummary(
+      query,
+      result.rows
+    );
+
     const modelInfo = llmService.getModelInfo();
     
     return res.json({
@@ -280,6 +287,7 @@ router.post('/nl-query', async (req: Request, res: Response) => {
       sql,
       explanation,
       confidence,
+      summary,
       message: `Retrieved ${result.rowCount} row(s) from PostgreSQL`,
       naturalLanguageQuery: query,
       model: {

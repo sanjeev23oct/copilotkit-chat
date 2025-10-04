@@ -26,9 +26,14 @@ export class LLMService {
         schema,
         tableHints
       );
-    } catch (error) {
-      logger.error('Error converting natural language to SQL:', error);
-      throw new Error('Failed to convert natural language to SQL');
+    } catch (error: any) {
+      logger.error('Error converting natural language to SQL:', {
+        message: error.message,
+        stack: error.stack,
+        status: error.status,
+        response: error.response?.data
+      });
+      throw error; // Re-throw the original error with details
     }
   }
 

@@ -14,9 +14,9 @@ export class UnifiedLLMService {
   constructor() {
     this.provider = process.env.LLM_PROVIDER || 'openrouter';
     this.model = process.env.LLM_MODEL || this.getDefaultModel();
-    
+
     const config = this.getProviderConfig();
-    
+
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
@@ -117,7 +117,7 @@ export class UnifiedLLMService {
   async chat(messages: any[], options?: any) {
     try {
       logger.info(`Calling LLM: ${this.provider} - ${this.model}`);
-      
+
       const response = await this.client.chat.completions.create({
         model: this.model,
         messages,
@@ -170,45 +170,36 @@ export class UnifiedLLMService {
   }> {
     try {
       logger.info(`Converting natural language to SQL: "${naturalLanguageQuery}"`);
-      
+
       const schemaInfo = this.formatSchemaForPrompt(schema);
 
-      const systemPrompt = `You are an expert SQL query generator. Convert natural language queries to PostgreSQL SQL queries.
+      const systemPrompt = `Convert natural language to PostgreSQL SELECT queries.
 
-Database Schema:
 ${schemaInfo}
 
-CRITICAL RULES:
-1. Only generate SELECT queries for security
-2. Use proper PostgreSQL syntax with correct column names from the schema above
-3. **VERIFY COLUMN NAMES**: Always use exact column names from the schema (e.g., order_items has "unit_price", not "price")
-4. **USE VIEWS WHEN AVAILABLE**: If a view exists that matches the query (like product_sales_summary), use it instead of complex JOINs
-5. Include appropriate JOINs when needed, using consistent table aliases
-6. Use LIMIT for large result sets (default 100 if not specified)
-7. Handle case-insensitive searches with ILIKE
-8. ALWAYS return ONLY valid JSON - no markdown, no code blocks, no extra text
-9. The SQL must be a single line without line breaks
-10. **GROUP BY RULE**: When using aggregate functions (SUM, AVG, COUNT, MAX, MIN), ALL non-aggregated columns in SELECT must appear in GROUP BY clause
-    - Example: SELECT p.product_name, p.units_in_stock, SUM(oi.quantity) FROM products p JOIN order_items oi ... GROUP BY p.product_id, p.product_name, p.units_in_stock
-    - Always include the primary key in GROUP BY for best practice
-11. Use LEFT JOIN when you want all records from the main table even if there are no matches
-12. For aggregations with multiple tables, group by the primary key and all non-aggregated columns
+RULES:
+1. Only SELECT queries
+2. Use EXACT table/column names from schema
+3. For aggregates, ALL non-aggregated columns must be in GROUP BY with primary key
+4. Use LEFT JOIN for optional data
+5. Add LIMIT 100 for large results
 
-RESPONSE FORMAT (return ONLY this JSON, nothing else):
-{
-  "sql": "SELECT * FROM users LIMIT 10",
-  "explanation": "This query retrieves all users with a limit of 10 rows",
-  "confidence": 0.95
-}
+EXAMPLE with VIEW:
+Q: "products with sales and ratings"
+A: {"sql":"SELECT product_name, total_quantity_sold as total_sales, total_revenue as revenue, avg_rating FROM product_sales_summary ORDER BY total_revenue DESC LIMIT 100","explanation":"Using pre-aggregated view for product sales data","confidence":0.98}
 
-DO NOT include markdown code blocks like \`\`\`json or \`\`\`. Return ONLY the raw JSON object.`;
+EXAMPLE with JOIN:
+Q: "products with stock"
+A: {"sql":"SELECT p.product_name, p.units_in_stock, COALESCE(SUM(oi.quantity),0) as sales FROM products p LEFT JOIN order_items oi ON p.product_id=oi.product_id GROUP BY p.product_id, p.product_name, p.units_in_stock LIMIT 100","explanation":"Products with stock and sales","confidence":0.95}
+
+Return ONLY JSON (no markdown):`;
 
       const userPrompt = `Convert this natural language query to SQL: "${naturalLanguageQuery}"
 
 ${tableHints?.length ? `Focus on these tables: ${tableHints.join(', ')}` : ''}`;
 
       logger.info(`Sending request to LLM...`);
-      
+
       const response = await this.chat(
         [
           { role: 'system', content: systemPrompt },
@@ -219,7 +210,7 @@ ${tableHints?.length ? `Focus on these tables: ${tableHints.join(', ')}` : ''}`;
 
       const content = response.choices[0]?.message?.content;
       logger.info(`LLM response content: ${content?.substring(0, 200)}...`);
-      
+
       if (!content) {
         throw new Error('No response from LLM');
       }
@@ -231,7 +222,7 @@ ${tableHints?.length ? `Focus on these tables: ${tableHints.join(', ')}` : ''}`;
       } else if (cleanContent.startsWith('```')) {
         cleanContent = cleanContent.replace(/^```\s*/, '').replace(/```\s*$/, '');
       }
-      
+
       // Try to parse JSON response
       try {
         const parsed = JSON.parse(cleanContent);
@@ -244,7 +235,7 @@ ${tableHints?.length ? `Focus on these tables: ${tableHints.join(', ')}` : ''}`;
       } catch (parseError) {
         logger.warn('Failed to parse JSON, trying fallback extraction');
         logger.warn(`Content was: ${cleanContent.substring(0, 500)}`);
-        
+
         // Fallback: extract SQL from response
         const sqlMatch = cleanContent.match(/SELECT[\s\S]*?(?=;|$)/i);
         const sql = sqlMatch ? sqlMatch[0].trim() : '';
@@ -271,11 +262,10 @@ ${tableHints?.length ? `Focus on these tables: ${tableHints.join(', ')}` : ''}`;
     const views = new Set<string>();
 
     schema.forEach((row) => {
-      // Track views separately
       if (row.table_type === 'VIEW') {
         views.add(row.table_name);
       }
-      
+
       if (!tables.has(row.table_name)) {
         tables.set(row.table_name, []);
       }
@@ -283,40 +273,84 @@ ${tableHints?.length ? `Focus on these tables: ${tableHints.join(', ')}` : ''}`;
         tables.get(row.table_name)?.push({
           column: row.column_name,
           type: row.data_type,
-          nullable: row.is_nullable === 'YES',
-          default: row.column_default,
         });
       }
     });
 
-    let schemaText = '';
-    
-    // List views first if any exist
+    // ULTRA-COMPACT FORMAT to fit in token limits
+    let schemaText = 'TABLES (use exact names):\n';
+
+    // Views first (compact)
     if (views.size > 0) {
-      schemaText += '=== AVAILABLE VIEWS (Pre-aggregated data) ===\n';
+      schemaText += '\nVIEWS:\n';
       views.forEach(viewName => {
-        schemaText += `View: ${viewName}\n`;
         const columns = tables.get(viewName) || [];
-        columns.forEach((col) => {
-          schemaText += `  - ${col.column} (${col.type})\n`;
-        });
-        schemaText += '\n';
+        const colNames = columns.map(c => c.column).join(', ');
+        schemaText += `${viewName}: ${colNames}\n`;
       });
-      schemaText += '=== TABLES ===\n';
     }
-    
+
+    // Tables (compact)
     tables.forEach((columns, tableName) => {
-      // Skip views in table section
       if (views.has(tableName)) return;
-      
-      schemaText += `Table: ${tableName}\n`;
-      columns.forEach((col) => {
-        schemaText += `  - ${col.column} (${col.type})${col.nullable ? ' NULL' : ' NOT NULL'}\n`;
-      });
-      schemaText += '\n';
+      const colNames = columns.map(c => c.column).join(', ');
+      schemaText += `${tableName}: ${colNames}\n`;
     });
 
+    // Key relationships (compact)
+    schemaText += '\nRELATIONS: products→categories,suppliers | orders→customers | order_items→orders,products | reviews→products,customers\n';
+
     return schemaText;
+  }
+
+  async generateDataSummary(
+    naturalLanguageQuery: string,
+    data: any[]
+  ): Promise<string> {
+    try {
+      if (!data || data.length === 0) {
+        return 'No data was found matching your query.';
+      }
+
+      // Prepare data summary
+      const rowCount = data.length;
+      const columns = Object.keys(data[0]);
+      const sampleRows = data.slice(0, 3);
+
+      const systemPrompt = `You are a data analyst assistant. Explain query results in clear, natural language.
+
+RULES:
+1. Write in a conversational, easy-to-understand style
+2. Highlight key insights and patterns
+3. Use bullet points for multiple items
+4. Include specific numbers and statistics
+5. Keep it concise but informative (2-4 paragraphs max)
+6. Don't mention SQL or technical details unless relevant
+7. Focus on what the data means, not how it was retrieved`;
+
+      const userPrompt = `The user asked: "${naturalLanguageQuery}"
+
+The query returned ${rowCount} record(s) with these columns: ${columns.join(', ')}
+
+Here are the first few results:
+${JSON.stringify(sampleRows, null, 2)}
+
+Please provide a natural language summary of these results that answers the user's question.`;
+
+      const response = await this.chat(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        { temperature: 0.3, max_tokens: 500 }
+      );
+
+      const summary = response.choices[0]?.message?.content?.trim();
+      return summary || 'Results retrieved successfully.';
+    } catch (error) {
+      logger.error('Error generating data summary:', error);
+      return `Found ${data.length} record(s) matching your query.`;
+    }
   }
 
   getModelInfo() {

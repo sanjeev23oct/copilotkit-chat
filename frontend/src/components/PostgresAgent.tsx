@@ -25,6 +25,7 @@ export default function PostgresAgent() {
   const [loading, setLoading] = useState(false);
   const [tables, setTables] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'query' | 'table' | 'nl'>('nl');
+  const [resultViewTab, setResultViewTab] = useState<'summary' | 'records' | 'chart'>('summary');
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3010';
 
@@ -346,41 +347,112 @@ export default function PostgresAgent() {
                       🤖 Model: {(result as any).model.provider} / {(result as any).model.name}
                     </p>
                   )}
-                  {(result as any).sql && (
-                    <div className="mt-2">
-                      <p className="text-sm text-gray-600 font-semibold">Generated SQL:</p>
-                      <pre className="mt-1 p-2 bg-gray-100 rounded text-xs overflow-x-auto">
-                        {(result as any).sql}
-                      </pre>
-                      {(result as any).explanation && (
-                        <p className="mt-2 text-sm text-gray-600">
-                          <strong>Explanation:</strong> {(result as any).explanation}
-                        </p>
+                </div>
+
+                {/* Result View Tabs */}
+                {result.data && Array.isArray(result.data) && result.data.length > 0 && (
+                  <div>
+                    <div className="flex gap-2 mb-4 border-b border-gray-200">
+                      {(result as any).summary && (
+                        <button
+                          onClick={() => setResultViewTab('summary')}
+                          className={`px-4 py-2 font-medium transition-colors ${
+                            resultViewTab === 'summary'
+                              ? 'text-blue-600 border-b-2 border-blue-600'
+                              : 'text-gray-600 hover:text-gray-800'
+                          }`}
+                        >
+                          📝 Summary
+                        </button>
                       )}
-                      {(result as any).confidence && (
-                        <p className="mt-1 text-sm text-gray-600">
-                          <strong>Confidence:</strong> {Math.round((result as any).confidence * 100)}%
-                        </p>
+                      <button
+                        onClick={() => setResultViewTab('records')}
+                        className={`px-4 py-2 font-medium transition-colors ${
+                          resultViewTab === 'records'
+                            ? 'text-blue-600 border-b-2 border-blue-600'
+                            : 'text-gray-600 hover:text-gray-800'
+                        }`}
+                      >
+                        📊 Records ({result.data.length})
+                      </button>
+                      {result.agui && result.agui.some((el: any) => el.type === 'chart') && (
+                        <button
+                          onClick={() => setResultViewTab('chart')}
+                          className={`px-4 py-2 font-medium transition-colors ${
+                            resultViewTab === 'chart'
+                              ? 'text-blue-600 border-b-2 border-blue-600'
+                              : 'text-gray-600 hover:text-gray-800'
+                          }`}
+                        >
+                          📈 Chart
+                        </button>
                       )}
                     </div>
-                  )}
-                </div>
-                
-                {result.agui && result.agui.length > 0 && (
-                  <div className="mt-4">
-                    {renderAGUI(result.agui)}
+
+                    {/* Summary Tab */}
+                    {resultViewTab === 'summary' && (result as any).summary && (
+                      <div className="bg-white border border-gray-200 rounded-lg p-6">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Analysis</h3>
+                        <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap">
+                          {(result as any).summary}
+                        </div>
+                        
+                        {(result as any).sql && (
+                          <details className="mt-4">
+                            <summary className="cursor-pointer text-sm text-gray-600 hover:text-gray-800">
+                              View Technical Details
+                            </summary>
+                            <div className="mt-2 p-3 bg-gray-50 rounded">
+                              <p className="text-xs text-gray-600 font-semibold mb-1">Generated SQL:</p>
+                              <pre className="p-2 bg-gray-100 rounded text-xs overflow-x-auto">
+                                {(result as any).sql}
+                              </pre>
+                              {(result as any).explanation && (
+                                <p className="mt-2 text-xs text-gray-600">
+                                  <strong>Explanation:</strong> {(result as any).explanation}
+                                </p>
+                              )}
+                              {(result as any).confidence && (
+                                <p className="mt-1 text-xs text-gray-600">
+                                  <strong>Confidence:</strong> {Math.round((result as any).confidence * 100)}%
+                                </p>
+                              )}
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Records Tab */}
+                    {resultViewTab === 'records' && result.agui && (
+                      <div>
+                        {renderAGUI(result.agui.filter((el: any) => el.type === 'table'))}
+                        
+                        <details className="mt-4">
+                          <summary className="cursor-pointer text-sm text-blue-600 hover:text-blue-800">
+                            View Raw JSON Data
+                          </summary>
+                          <pre className="mt-2 p-4 bg-gray-100 rounded overflow-x-auto text-xs">
+                            {JSON.stringify(result.data, null, 2)}
+                          </pre>
+                        </details>
+                      </div>
+                    )}
+
+                    {/* Chart Tab */}
+                    {resultViewTab === 'chart' && result.agui && (
+                      <div>
+                        {renderAGUI(result.agui.filter((el: any) => el.type === 'chart'))}
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {result.data && Array.isArray(result.data) && result.data.length > 0 && (
-                  <details className="mt-4">
-                    <summary className="cursor-pointer text-blue-600 hover:text-blue-800">
-                      View Raw JSON Data ({result.data.length} rows)
-                    </summary>
-                    <pre className="mt-2 p-4 bg-gray-100 rounded overflow-x-auto text-sm">
-                      {JSON.stringify(result.data, null, 2)}
-                    </pre>
-                  </details>
+                {/* No data case */}
+                {(!result.data || result.data.length === 0) && (
+                  <div className="bg-gray-50 border border-gray-200 rounded p-4">
+                    <p className="text-gray-600">No records found matching your query.</p>
+                  </div>
                 )}
               </div>
             ) : (
