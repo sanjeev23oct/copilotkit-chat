@@ -50,11 +50,16 @@ export class DatabaseService {
       LEFT JOIN information_schema.columns c ON t.table_name = c.table_name
       LEFT JOIN information_schema.table_constraints tc ON t.table_name = tc.table_name
       WHERE t.table_schema = 'public'
+        AND (
+          LOWER(t.table_name) LIKE '%sewadar%' 
+          OR LOWER(t.table_name) LIKE '%department%'
+        )
       ORDER BY t.table_name, c.ordinal_position;
     `;
     
     try {
       const result = await this.query(query);
+      logger.info(`Filtered schema: Found ${new Set(result.rows.map((r: any) => r.table_name)).size} tables matching 'sewadar' or 'department'`);
       return result.rows;
     } catch (error) {
       logger.error('Error fetching table schema:', error);
