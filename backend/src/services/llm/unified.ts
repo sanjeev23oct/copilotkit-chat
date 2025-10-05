@@ -126,13 +126,28 @@ export class UnifiedLLMService {
         setTimeout(() => reject(new Error(`LLM request timeout after ${timeout/1000}s`)), timeout);
       });
 
-      const chatPromise = this.client.chat.completions.create({
+      // Build request parameters with context length support
+      const requestParams: any = {
         model: this.model,
         messages,
         temperature: options?.temperature ?? 0.1,
         max_tokens: options?.max_tokens ?? 2000,
         stream: false,
-      });
+      };
+
+      // Add context length parameter for providers that support it
+      const contextLength = this.getModelContextLength();
+      if (contextLength > 4096) {
+        // Add context window parameter based on provider
+        if (this.provider === 'onprem' || this.provider === 'custom' || this.provider === 'ollama') {
+          requestParams.context_length = contextLength;
+          // Also try alternative parameter names
+          requestParams.max_context = contextLength;
+          requestParams.n_ctx = contextLength;
+        }
+      }
+
+      const chatPromise = this.client.chat.completions.create(requestParams);
 
       const response = await Promise.race([chatPromise, timeoutPromise]) as any;
       
@@ -153,13 +168,27 @@ export class UnifiedLLMService {
 
   async *chatStream(messages: any[], options?: any) {
     try {
-      const stream = await this.client.chat.completions.create({
+      // Build request parameters with context length support
+      const requestParams: any = {
         model: this.model,
         messages,
         temperature: options?.temperature ?? 0.1,
         max_tokens: options?.max_tokens ?? 2000,
         stream: true,
-      });
+      };
+
+      // Add context length parameter for providers that support it
+      const contextLength = this.getModelContextLength();
+      if (contextLength > 4096) {
+        // Add context window parameter based on provider
+        if (this.provider === 'onprem' || this.provider === 'custom' || this.provider === 'ollama') {
+          requestParams.context_length = contextLength;
+          requestParams.max_context = contextLength;
+          requestParams.n_ctx = contextLength;
+        }
+      }
+
+      const stream = await this.client.chat.completions.create(requestParams) as any;
 
       for await (const chunk of stream) {
         yield chunk;
@@ -188,22 +217,26 @@ export class UnifiedLLMService {
 
 ${schemaInfo}
 
-RULES:
-1. Only SELECT queries
-2. Use EXACT table/column names from schema
-3. For aggregates, ALL non-aggregated columns must be in GROUP BY with primary key
-4. Use LEFT JOIN for optional data
-5. Add LIMIT 100 for large results
+CRITICAL RULES:
+1. ONLY use table/column names that EXIST in the schema above
+2. NEVER guess or assume column names - only use what's shown
+3. For JOINs, verify all referenced columns exist in both tables
+4. For aggregates: ALL non-aggregated columns MUST be in GROUP BY
+5. Use simple queries when possible - avoid complex JOINs unless necessary
+6. Add LIMIT 100 for safety
+7. NO table aliases unless absolutely necessary
 
-EXAMPLE with VIEW:
-Q: "products with sales and ratings"
-A: {"sql":"SELECT product_name, total_quantity_sold as total_sales, total_revenue as revenue, avg_rating FROM product_sales_summary ORDER BY total_revenue DESC LIMIT 100","explanation":"Using pre-aggregated view for product sales data","confidence":0.98}
+SAFE PATTERNS:
+- Single table: SELECT column1, column2 FROM table_name WHERE condition LIMIT 100
+- Count: SELECT COUNT(*) FROM table_name WHERE condition
+- Group by: SELECT column1, COUNT(*) FROM table_name GROUP BY column1 LIMIT 100
 
-EXAMPLE with JOIN:
-Q: "products with stock"
-A: {"sql":"SELECT p.product_name, p.units_in_stock, COALESCE(SUM(oi.quantity),0) as sales FROM products p LEFT JOIN order_items oi ON p.product_id=oi.product_id GROUP BY p.product_id, p.product_name, p.units_in_stock LIMIT 100","explanation":"Products with stock and sales","confidence":0.95}
+AVOID:
+- Assuming foreign key column names
+- Complex JOINs without verifying column names
+- Table aliases like 'dcm', 's', etc. unless essential
 
-Return ONLY JSON (no markdown):`;
+Return ONLY JSON format: {"sql":"...","explanation":"...","confidence":0.0-1.0}`;
 
       const userPrompt = `Convert this natural language query to SQL: "${naturalLanguageQuery}"
 
@@ -288,28 +321,28 @@ ${tableHints?.length ? `Focus on these tables: ${tableHints.join(', ')}` : ''}`;
       }
     });
 
-    // ULTRA-COMPACT FORMAT to fit in token limits
-    let schemaText = 'TABLES (use exact names):\n';
+    // ULTRA-COMPACT but PRECISE format
+    let schemaText = 'AVAILABLE TABLES & COLUMNS (use EXACT names):\n\n';
 
-    // Views first (compact)
+    // Views first
     if (views.size > 0) {
-      schemaText += '\nVIEWS:\n';
+      schemaText += 'VIEWS:\n';
       views.forEach(viewName => {
         const columns = tables.get(viewName) || [];
-        const colNames = columns.map(c => c.column).join(', ');
+        const colNames = columns.slice(0, 12).map(c => c.column).join(', ');
         schemaText += `${viewName}: ${colNames}\n`;
       });
+      schemaText += '\n';
     }
 
-    // Tables (compact)
+    // Regular tables
     tables.forEach((columns, tableName) => {
       if (views.has(tableName)) return;
-      const colNames = columns.map(c => c.column).join(', ');
+      const colNames = columns.slice(0, 12).map(c => c.column).join(', ');
       schemaText += `${tableName}: ${colNames}\n`;
     });
 
-    // Key relationships (compact)
-    schemaText += '\nRELATIONS: products→categories,suppliers | orders→customers | order_items→orders,products | reviews→products,customers\n';
+    schemaText += '\n⚠️ ONLY use column names listed above. DO NOT guess or assume other columns exist.';
 
     return schemaText;
   }
@@ -374,10 +407,60 @@ Provide a clear, formatted summary.`;
     }
   }
 
+  private getModelContextLength(): number {
+    const provider = this.provider.toLowerCase();
+    const model = this.model.toLowerCase();
+
+    // Model-specific context lengths
+    if (model.includes('llama-3.1') || model.includes('llama3.1')) {
+      return 32768; // Llama 3.1 supports up to 32K context
+    }
+    if (model.includes('llama-3.3') || model.includes('llama3.3')) {
+      return 32768; // Llama 3.3 supports up to 32K context
+    }
+    if (model.includes('gemma2')) {
+      return 8192; // Gemma 2 supports 8K context
+    }
+    if (model.includes('mistral') || model.includes('mixtral')) {
+      return 32768; // Mistral models typically support 32K
+    }
+    if (model.includes('qwen')) {
+      return 32768; // Qwen models support 32K
+    }
+    if (model.includes('deepseek')) {
+      return 32768; // DeepSeek supports 32K
+    }
+    if (model.includes('gpt-4')) {
+      return 128000; // GPT-4 supports 128K context
+    }
+    if (model.includes('gpt-3.5')) {
+      return 16384; // GPT-3.5 supports 16K context
+    }
+
+    // Provider defaults
+    switch (provider) {
+      case 'openai':
+        return 16384;
+      case 'groq':
+        return 32768;
+      case 'openrouter':
+        return 32768;
+      case 'deepseek':
+        return 32768;
+      case 'onprem':
+      case 'custom':
+      case 'ollama':
+        return 32768; // Assume modern models support larger context
+      default:
+        return 8192; // Conservative default
+    }
+  }
+
   getModelInfo() {
     return {
       provider: this.provider,
       model: this.model,
+      contextLength: this.getModelContextLength(),
     };
   }
 }
