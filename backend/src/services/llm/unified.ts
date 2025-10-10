@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import logger from '../../utils/logger';
+import { DynamicSchemaDiscoveryService, DatabaseSchema, SchemaFilter } from '../dynamic-schema';
 
 /**
  * Unified LLM Service
@@ -10,8 +11,12 @@ export class UnifiedLLMService {
   private client: OpenAI;
   private model: string;
   private provider: string;
+  private schemaService?: DynamicSchemaDiscoveryService;
 
-  constructor() {
+  constructor(schemaService?: DynamicSchemaDiscoveryService) {
+    if (schemaService) {
+      this.schemaService = schemaService;
+    }
     this.provider = process.env.LLM_PROVIDER || 'openrouter';
     this.model = process.env.LLM_MODEL || this.getDefaultModel();
 
@@ -117,13 +122,23 @@ export class UnifiedLLMService {
   async chat(messages: any[], options?: any) {
     try {
       logger.info(`Calling LLM: ${this.provider} - ${this.model}`);
+      logger.info(`LLM Base URL: ${this.client.baseURL}`);
+      logger.info(`Request parameters: ${JSON.stringify({
+        model: this.model,
+        messageCount: messages.length,
+        temperature: options?.temperature ?? 0.1
+      })}`);
+      
       const startTime = Date.now();
 
-      // Set timeout based on provider (on-prem needs more time)
-      const timeout = this.provider === 'onprem' || this.provider === 'custom' ? 60000 : 30000;
+      // Set timeout based on provider (increased for Groq due to rate limits)
+      const timeout = this.provider === 'groq' ? 60000 : (this.provider === 'onprem' || this.provider === 'custom' ? 120000 : 30000);
       
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error(`LLM request timeout after ${timeout/1000}s`)), timeout);
+        setTimeout(() => {
+          logger.error(`LLM request timeout after ${timeout/1000}s for ${this.provider} at ${this.client.baseURL}`);
+          reject(new Error(`LLM request timeout after ${timeout/1000}s`));
+        }, timeout);
       });
 
       // Build request parameters with context length support
@@ -201,8 +216,14 @@ export class UnifiedLLMService {
 
   async convertNaturalLanguageToSQL(
     naturalLanguageQuery: string,
-    schema: any[],
-    tableHints?: string[]
+    schema?: any[] | DatabaseSchema,
+    tableHints?: string[],
+    options?: {
+      schemaName?: string;
+      useCache?: boolean;
+      maxTables?: number;
+      includeFunctions?: boolean;
+    }
   ): Promise<{
     sql: string;
     explanation: string;
@@ -211,32 +232,49 @@ export class UnifiedLLMService {
     try {
       logger.info(`Converting natural language to SQL: "${naturalLanguageQuery}"`);
 
-      const schemaInfo = this.formatSchemaForPrompt(schema);
+      let schemaInfo: string;
+      
+      // Use dynamic schema if available and no legacy schema provided
+      if (this.schemaService && (!schema || Array.isArray(schema) && schema.length === 0)) {
+        const dynamicSchema = await this.getDynamicSchema(options?.schemaName, tableHints, options);
+        schemaInfo = this.formatDynamicSchemaForPrompt(dynamicSchema, tableHints);
+      } else if (schema && !Array.isArray(schema)) {
+        // Handle DatabaseSchema object
+        schemaInfo = this.formatDynamicSchemaForPrompt(schema as DatabaseSchema, tableHints);
+      } else {
+        // Fallback to legacy schema format
+        schemaInfo = this.formatSchemaForPrompt(schema as any[] || []);
+      }
 
-      const systemPrompt = `Convert natural language to PostgreSQL SELECT queries.
+      const systemPrompt = `Convert natural language to PostgreSQL for RSSB system.
 
 ${schemaInfo}
 
-CRITICAL RULES:
-1. ONLY use table/column names that EXIST in the schema above
-2. NEVER guess or assume column names - only use what's shown
-3. For JOINs, verify all referenced columns exist in both tables
-4. For aggregates: ALL non-aggregated columns MUST be in GROUP BY
-5. Use simple queries when possible - avoid complex JOINs unless necessary
-6. Add LIMIT 100 for safety
-7. NO table aliases unless absolutely necessary
+CRITICAL RSSB SCHEMA RULES:
+• sewadar table has: id, badge_number, applicant_name, centre_id, department_id, deployed_department_id
+• area table has: id, area_name (NO department_id column)
+• centre table has: id, centre_name (NO department_id column)
+• department table has: id, department_name, department_code
+• Use "applicant_name" NOT "name" or "sewadar_name"
+• Add LIMIT 100 to all queries
 
-SAFE PATTERNS:
-- Single table: SELECT column1, column2 FROM table_name WHERE condition LIMIT 100
-- Count: SELECT COUNT(*) FROM table_name WHERE condition
-- Group by: SELECT column1, COUNT(*) FROM table_name GROUP BY column1 LIMIT 100
+CORRECT SEWADAR QUERY PATTERN (from actual RSSB system):
+SELECT s.id, s.badge_number, s.applicant_name, s.father_husband_name,
+       a.area_name, c.centre_name, d.department_name, st.status_name
+FROM sewadar s
+JOIN area a ON a.id = s.area_id
+JOIN centre c ON c.id = s.centre_id
+JOIN department d ON d.id = s.department_id
+JOIN status st ON st.id = s.status_id
+WHERE s.is_valid = true AND s.is_active = true
+LIMIT 100;
 
-AVOID:
-- Assuming foreign key column names
-- Complex JOINs without verifying column names
-- Table aliases like 'dcm', 's', etc. unless essential
+FORBIDDEN PATTERNS:
+❌ a.department_id (area table has NO department_id)
+❌ c.department_id (centre table has NO department_id)
+❌ centre_department_mapping JOIN (not needed for basic sewadar queries)
 
-Return ONLY JSON format: {"sql":"...","explanation":"...","confidence":0.0-1.0}`;
+Return JSON: {"sql":"...","explanation":"...","confidence":0.0-1.0}`;
 
       const userPrompt = `Convert this natural language query to SQL: "${naturalLanguageQuery}"
 
@@ -302,6 +340,7 @@ ${tableHints?.length ? `Focus on these tables: ${tableHints.join(', ')}` : ''}`;
   }
 
   private formatSchemaForPrompt(schema: any[]): string {
+    // ULTRA-COMPACT schema format to stay within Groq's 6000 token limit
     const tables = new Map<string, any[]>();
     const views = new Set<string>();
 
@@ -309,42 +348,221 @@ ${tableHints?.length ? `Focus on these tables: ${tableHints.join(', ')}` : ''}`;
       if (row.table_type === 'VIEW') {
         views.add(row.table_name);
       }
-
       if (!tables.has(row.table_name)) {
         tables.set(row.table_name, []);
       }
       if (row.column_name) {
-        tables.get(row.table_name)?.push({
-          column: row.column_name,
-          type: row.data_type,
-        });
+        tables.get(row.table_name)?.push(row.column_name);
       }
     });
 
-    // ULTRA-COMPACT but PRECISE format
-    let schemaText = 'AVAILABLE TABLES & COLUMNS (use EXACT names):\n\n';
+    // ULTRA-COMPACT RSSB SCHEMA (Token-optimized)
+    let schemaText = 'RSSB TABLES:\n\n';
 
-    // Views first
+    // Primary table - only key columns
+    schemaText += 'sewadar: id, badge_number, applicant_name, status_id, area_id, centre_id, department_id, deployed_department_id, is_active, is_valid\n';
+    
+    // Key supporting tables - minimal columns
+    schemaText += 'department: id, department_name, department_code, is_active\n';
+    schemaText += 'centre: id, centre_name, is_active\n';
+    schemaText += 'area: id, area_name, is_active\n';
+    schemaText += 'status: id, status_name, is_active\n';
+
+    // Views (if any)
     if (views.size > 0) {
-      schemaText += 'VIEWS:\n';
+      schemaText += '\nVIEWS:\n';
       views.forEach(viewName => {
         const columns = tables.get(viewName) || [];
-        const colNames = columns.slice(0, 12).map(c => c.column).join(', ');
-        schemaText += `${viewName}: ${colNames}\n`;
+        const keyColumns = columns.slice(0, 5).join(', ');
+        schemaText += `${viewName}: ${keyColumns}\n`;
       });
-      schemaText += '\n';
     }
 
-    // Regular tables
-    tables.forEach((columns, tableName) => {
-      if (views.has(tableName)) return;
-      const colNames = columns.slice(0, 12).map(c => c.column).join(', ');
-      schemaText += `${tableName}: ${colNames}\n`;
-    });
+    // Other tables (very limited)
+    const otherTables = Array.from(tables.keys())
+      .filter(name => !views.has(name) && !['sewadar', 'department', 'centre', 'area'].includes(name))
+      .slice(0, 10); // Limit to 10 tables max
 
-    schemaText += '\n⚠️ ONLY use column names listed above. DO NOT guess or assume other columns exist.';
+    if (otherTables.length > 0) {
+      schemaText += '\nOTHER:\n';
+      otherTables.forEach(tableName => {
+        const columns = tables.get(tableName) || [];
+        const keyColumns = columns.slice(0, 3).join(', ');
+        schemaText += `${tableName}: ${keyColumns}\n`;
+      });
+    }
+
+    // Critical rules (ultra-compact)
+    schemaText += '\nCRITICAL RULES:\n';
+    schemaText += '• Use "applicant_name" NOT "name"\n';
+    schemaText += '• area table has NO department_id column\n';
+    schemaText += '• centre table has NO department_id column\n';
+    schemaText += '• sewadar has centre_id/department_id directly\n';
+    schemaText += '• Always use WHERE s.is_valid = true AND s.is_active = true\n';
+    schemaText += '• Add LIMIT 100\n';
 
     return schemaText;
+  }
+
+  /**
+   * Format dynamic schema for LLM prompt with intelligent optimization
+   */
+  private formatDynamicSchemaForPrompt(schema: DatabaseSchema, tableHints?: string[]): string {
+    return this.schemaService?.generateSchemaContext(schema, {
+      includeComments: true,
+      includeConstraints: true,
+      includeIndexes: false,
+      maxTablesInContext: 50,
+      prioritizeTables: tableHints || []
+    }) || 'No schema available';
+  }
+
+  /**
+   * Get dynamic schema with intelligent filtering
+   */
+  private async getDynamicSchema(
+    schemaName: string = 'public',
+    tableHints?: string[],
+    options?: {
+      maxTables?: number;
+      includeFunctions?: boolean;
+      useCache?: boolean;
+    }
+  ): Promise<DatabaseSchema> {
+    if (!this.schemaService) {
+      throw new Error('Schema service not available');
+    }
+
+    const filter: SchemaFilter = {
+      includeSchemas: [schemaName],
+      maxTables: options?.maxTables || 50,
+      includeFunctions: options?.includeFunctions !== false,
+      includeProcedures: true,
+      includeViews: true,
+      includeSystemTables: false
+    };
+
+    // Add table hints as patterns
+    if (tableHints?.length) {
+      filter.includeTablePatterns = tableHints;
+    }
+
+    return await this.schemaService.discoverSchema(schemaName, filter);
+  }
+
+  /**
+   * Set schema service for dynamic discovery
+   */
+  setSchemaService(schemaService: DynamicSchemaDiscoveryService): void {
+    this.schemaService = schemaService;
+  }
+
+  /**
+   * Get schema service
+   */
+  getSchemaService(): DynamicSchemaDiscoveryService | undefined {
+    return this.schemaService;
+  }
+
+  /**
+   * Generate enhanced SQL with schema awareness
+   */
+  async generateEnhancedSQL(
+    naturalLanguageQuery: string,
+    options?: {
+      schemaName?: string;
+      tableHints?: string[];
+      maxTables?: number;
+      includeFunctions?: boolean;
+      useCache?: boolean;
+      requireExactMatch?: boolean;
+    }
+  ): Promise<{
+    sql: string;
+    explanation: string;
+    confidence: number;
+    usedTables: string[];
+    suggestedIndexes?: string[];
+    alternativeQueries?: string[];
+  }> {
+    const result = await this.convertNaturalLanguageToSQL(
+      naturalLanguageQuery,
+      undefined,
+      options?.tableHints,
+      options
+    );
+
+    // Extract used tables from SQL
+    const usedTables = this.extractTablesFromSQL(result.sql);
+
+    return {
+      ...result,
+      usedTables,
+      suggestedIndexes: this.suggestIndexes(result.sql, usedTables),
+      alternativeQueries: await this.generateAlternativeQueries(naturalLanguageQuery, usedTables)
+    };
+  }
+
+  /**
+   * Extract table names from SQL query
+   */
+  private extractTablesFromSQL(sql: string): string[] {
+    const tablePattern = /(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)/gi;
+    const matches = sql.match(tablePattern) || [];
+    return [...new Set(matches.map(match =>
+      match.replace(/(?:FROM|JOIN)\s+/i, '').trim()
+    ))];
+  }
+
+  /**
+   * Suggest indexes based on SQL query
+   */
+  private suggestIndexes(sql: string, usedTables: string[]): string[] {
+    const suggestions: string[] = [];
+    
+    // Look for WHERE clauses and suggest indexes
+    const wherePattern = /WHERE\s+([^;]+)/i;
+    const whereMatch = sql.match(wherePattern);
+    
+    if (whereMatch) {
+      const whereClause = whereMatch[1];
+      const columnPattern = /([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*|\b[a-zA-Z_][a-zA-Z0-9_]*\b)\s*[=<>]/g;
+      const columns = whereClause.match(columnPattern) || [];
+      
+      columns.forEach(col => {
+        const cleanCol = col.replace(/\s*[=<>].*/, '').trim();
+        if (cleanCol && !cleanCol.includes('(')) {
+          suggestions.push(`CREATE INDEX IF NOT EXISTS idx_${cleanCol.replace('.', '_')} ON ${cleanCol.includes('.') ? cleanCol.split('.')[0] : usedTables[0] || 'table'} (${cleanCol.includes('.') ? cleanCol.split('.')[1] : cleanCol});`);
+        }
+      });
+    }
+    
+    return [...new Set(suggestions)];
+  }
+
+  /**
+   * Generate alternative query suggestions
+   */
+  private async generateAlternativeQueries(naturalLanguageQuery: string, usedTables: string[]): Promise<string[]> {
+    try {
+      const alternativePrompt = `Given this query intent: "${naturalLanguageQuery}"
+And these tables: ${usedTables.join(', ')}
+
+Suggest 2-3 alternative ways to phrase this query that might yield different insights:`;
+
+      const response = await this.chat([
+        { role: 'user', content: alternativePrompt }
+      ], { temperature: 0.7, max_tokens: 300 });
+
+      const suggestions = response.choices[0]?.message?.content?.split('\n').filter((line: string) =>
+        line.trim() && !line.startsWith('#') && !line.startsWith('*')
+      ) || [];
+
+      return suggestions.slice(0, 3);
+    } catch (error) {
+      logger.warn('Failed to generate alternative queries:', error);
+      return [];
+    }
   }
 
   async generateDataSummary(
@@ -461,7 +679,45 @@ Provide a clear, formatted summary.`;
       provider: this.provider,
       model: this.model,
       contextLength: this.getModelContextLength(),
+      baseURL: this.client.baseURL,
     };
+  }
+
+  // Test LLM connectivity
+  async testConnection(): Promise<{ success: boolean; message: string; latency?: number }> {
+    try {
+      logger.info(`Testing LLM connectivity: ${this.provider} at ${this.client.baseURL}`);
+      const startTime = Date.now();
+
+      // Simple test message
+      const testResponse = await this.chat([
+        {
+          role: 'user',
+          content: 'Hello! Please respond with just "OK" to test connectivity.'
+        }
+      ], { max_tokens: 10, temperature: 0 });
+
+      const latency = Date.now() - startTime;
+      logger.info(`LLM connectivity test successful in ${latency}ms`);
+
+      return {
+        success: true,
+        message: `Connection successful to ${this.provider} (${latency}ms)`,
+        latency
+      };
+    } catch (error: any) {
+      logger.error(`LLM connectivity test failed:`, {
+        provider: this.provider,
+        baseURL: this.client.baseURL,
+        error: error.message,
+        stack: error.stack
+      });
+
+      return {
+        success: false,
+        message: `Connection failed: ${error.message}`
+      };
+    }
   }
 }
 

@@ -9,6 +9,7 @@ import chatRouter from './routes/chat';
 import agRouter from './routes/ag';
 import aguiStreamRouter from './routes/agui-stream';
 import postgresAgentRouter from './routes/postgres-agent';
+import multiAgentRouter from './routes/multi-agent';
 import logger from './utils/logger';
 
 // Load environment variables
@@ -20,8 +21,32 @@ const PORT = process.env.PORT || 3010;
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5185',
-  credentials: true
+  origin: [
+    'http://localhost:5185',
+    'http://localhost:3000',
+    'http://127.0.0.1:5185',
+    'http://127.0.0.1:3000',
+    process.env.FRONTEND_URL || 'http://localhost:5185'
+  ].filter(Boolean),
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Access-Control-Request-Method',
+    'Access-Control-Request-Headers',
+    'DNT',
+    'sec-ch-ua',
+    'sec-ch-ua-mobile',
+    'sec-ch-ua-platform',
+    'User-Agent',
+    'Referer',
+    'x-copilotkit-runtime-client-gql-version'
+  ],
+  optionsSuccessStatus: 200
 }));
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
@@ -44,6 +69,7 @@ app.use('/api/chat', chatRouter);
 app.use('/ag', agRouter);
 app.use('/custom-agent', aguiStreamRouter);
 app.use('/api/postgres-agent', postgresAgentRouter);
+app.use('/api/multi-agent', multiAgentRouter);
 
 // Basic route
 app.get('/', (_req, res) => {
@@ -56,6 +82,7 @@ app.get('/', (_req, res) => {
       database: '/api/database',
       chat: '/api/chat',
       postgresAgent: '/api/postgres-agent',
+      multiAgent: '/api/multi-agent',
       health: '/api/health'
     }
   });

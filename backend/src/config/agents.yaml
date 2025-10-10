@@ -1,0 +1,357 @@
+# Agent Configuration for Multi-Agent PostgreSQL System
+# This file defines the domain-specific agents and their resource mappings
+
+agents:
+  sewadar:
+    name: "Sewadar Agent"
+    description: "Handles RSSB sewadar information, profiles, and eligibility using specific database functions"
+    domain: "sewadar"
+    priority: 10
+    specific_tables:
+      # Primary tables (starting points)
+      - "sewadar"                      # PRIMARY: All sewadar details start here
+      
+      # Supporting/link tables
+
+      - "sewadar_attendance_summary"   # Link: All attendance queries start here
+      - "area"                         # Link: Geographic area information
+      - "centre"                       # Link: Centre details and mappings
+      - "centre_department_mapping"    # Link: Centre-department relationships
+      - "centre_type"                  # Link: Centre classification
+      - "department"                   # Link: Department information
+      - "sewadar_attendance"          # Link: Detailed attendance records
+      - "sewadar_family_reference"    # Link: Family relationships
+      - "sewadar_pics_update"         # Link: Photo/picture updates
+    specific_functions:
+      - "ufunc_get_sewadar_basics"
+      - "ufunc_get_sewadar_search"
+      - "ufunc_attendance_summary"
+    function_signatures:
+      ufunc_get_sewadar_basics:
+        parameters:
+          - name: "_loggedin_badge"
+            type: "varchar"
+            description: "Logged in user's badge number"
+          - name: "_loggedin_role"
+            type: "varchar"
+            description: "Logged in user's role (e.g., 'ss-admin')"
+          - name: "_search_badge"
+            type: "varchar"
+            description: "Badge number to search for"
+          - name: "_sewadar_id"
+            type: "integer"
+            description: "Sewadar ID (use 0 for badge-based search)"
+        example: "SELECT * FROM public.ufunc_get_sewadar_basics('BH0011GC4321', 'ss-admin', 'BH0011GB8271', 0)"
+      ufunc_get_sewadar_search:
+        parameters:
+          - name: "_loggedin_badge"
+            type: "varchar"
+            description: "Logged in user's badge number"
+          - name: "_loggedin_role"
+            type: "varchar"
+            description: "Logged in user's role"
+          - name: "_sewadar_name"
+            type: "varchar"
+            description: "Sewadar name to search for (partial match)"
+          - name: "_father_husband_name"
+            type: "varchar"
+            description: "Father/husband name (nullable)"
+          - name: "_badge_number"
+            type: "varchar"
+            description: "Badge number (nullable)"
+          - name: "_area_id"
+            type: "integer"
+            description: "Area ID filter (nullable)"
+          - name: "_centre_id"
+            type: "integer"
+            description: "Centre ID filter (nullable)"
+          - name: "_department_id"
+            type: "integer"
+            description: "Department ID filter (nullable)"
+          - name: "_resaddress"
+            type: "varchar"
+            description: "Residential address filter (nullable)"
+          - name: "pagenumber"
+            type: "integer"
+            description: "Page number for pagination"
+          - name: "pagesize"
+            type: "integer"
+            description: "Number of records per page"
+        example: "SELECT * FROM public.ufunc_get_sewadar_search('BH0011GB2002', 'ss-admin', 'Gulshan', null, null, null, null, null, null, 1, 100)"
+      ufunc_attendance_summary:
+        parameters:
+          - name: "_loggedin_badge"
+            type: "varchar"
+            description: "Logged in user's badge number"
+          - name: "_loggedin_role"
+            type: "varchar"
+            description: "Logged in user's role"
+          - name: "_sewadar_badge"
+            type: "varchar"
+            description: "Sewadar badge to get attendance summary for"
+          - name: "_from_date"
+            type: "date"
+            description: "Start date for attendance summary"
+          - name: "_to_date"
+            type: "date"
+            description: "End date for attendance summary"
+        example: "SELECT * FROM public.ufunc_attendance_summary('BH0011GC4321', 'ss-admin', 'BH0011GB8271', '2024-01-01', '2024-01-31')"
+        description: "Get attendance summary for a sewadar within date range"
+    table_patterns:
+      - "area"
+      - "centre%"
+      - "department"
+      - "sewadar%"
+    procedure_patterns: []
+    function_patterns:
+      - "ufunc_get_sewadar%"
+      - "ufunc_attendance%"
+    keywords:
+      - "sewadar"
+      - "badge"
+      - "profile"
+      - "eligibility"
+      - "personal"
+      - "volunteer"
+    external_apis:
+      - name: "sewadar_verification"
+        endpoint: "${EXTERNAL_API_BASE}/sewadar/verify/{badge}"
+        method: "GET"
+        description: "Verify sewadar with external identity system"
+      - name: "background_check"
+        endpoint: "${EXTERNAL_API_BASE}/background-check"
+        method: "POST"
+        description: "Perform background verification for sewadar"
+
+  department:
+    name: "Department Agent"
+    description: "Manages department information, structure, and assignments"
+    domain: "department"
+    priority: 8
+    table_patterns:
+      - "department%"
+      - "section%"
+      - "unit%"
+      - "division%"
+      - "hierarchy%"
+      - "assignment%"
+    procedure_patterns:
+      - "sp_get_department%"
+      - "sp_department%"
+      - "sp_assign_department%"
+      - "sp_transfer_department%"
+    function_patterns:
+      - "fn_calculate_department%"
+      - "fn_department%"
+      - "fn_get_department%"
+      - "fn_check_department%"
+    keywords:
+      - "department"
+      - "section"
+      - "unit"
+      - "division"
+      - "assignment"
+      - "transfer"
+      - "hierarchy"
+    external_apis:
+      - name: "department_sync"
+        endpoint: "${EXTERNAL_API_BASE}/departments/sync"
+        method: "POST"
+        description: "Sync department structure with external systems"
+
+  attendance:
+    name: "Attendance Agent"
+    description: "Tracks attendance, duties, and scheduling"
+    domain: "attendance"
+    priority: 7
+    table_patterns:
+      - "attendance%"
+      - "duty%"
+      - "schedule%"
+      - "shift%"
+      - "roster%"
+      - "checkin%"
+      - "checkout%"
+    procedure_patterns:
+      - "sp_mark_attendance%"
+      - "sp_attendance%"
+      - "sp_duty%"
+      - "sp_schedule%"
+      - "sp_generate_roster%"
+    function_patterns:
+      - "fn_calculate_attendance%"
+      - "fn_attendance%"
+      - "fn_duty%"
+      - "fn_check_attendance%"
+    keywords:
+      - "attendance"
+      - "present"
+      - "absent"
+      - "duty"
+      - "schedule"
+      - "shift"
+      - "roster"
+      - "checkin"
+      - "checkout"
+    external_apis:
+      - name: "time_tracking"
+        endpoint: "${EXTERNAL_API_BASE}/time/track"
+        method: "POST"
+        description: "External time tracking system integration"
+
+  reports:
+    name: "Reports Agent"
+    description: "Generates reports and analytics across all domains"
+    domain: "reports"
+    priority: 5
+    table_patterns:
+      - "report%"
+      - "analytics%"
+      - "metrics%"
+      - "dashboard%"
+      - "summary%"
+      - "statistics%"
+    procedure_patterns:
+      - "sp_generate_report%"
+      - "sp_report%"
+      - "sp_analytics%"
+      - "sp_dashboard%"
+      - "sp_metrics%"
+    function_patterns:
+      - "fn_calculate_metrics%"
+      - "fn_report%"
+      - "fn_analytics%"
+      - "fn_aggregate%"
+    keywords:
+      - "report"
+      - "analytics"
+      - "metrics"
+      - "dashboard"
+      - "summary"
+      - "statistics"
+      - "chart"
+      - "graph"
+    external_apis:
+      - name: "reporting_service"
+        endpoint: "${EXTERNAL_API_BASE}/reports/generate"
+        method: "POST"
+        description: "External reporting service for complex analytics"
+
+  admin:
+    name: "Admin Agent"
+    description: "Administrative functions and system management"
+    domain: "admin"
+    priority: 3
+    table_patterns:
+      - "admin%"
+      - "user%"
+      - "role%"
+      - "permission%"
+      - "audit%"
+      - "log%"
+      - "config%"
+      - "system%"
+    procedure_patterns:
+      - "sp_admin%"
+      - "sp_user%"
+      - "sp_role%"
+      - "sp_permission%"
+      - "sp_audit%"
+      - "sp_backup%"
+    function_patterns:
+      - "fn_admin%"
+      - "fn_user%"
+      - "fn_role%"
+      - "fn_permission%"
+      - "fn_audit%"
+      - "fn_system%"
+    keywords:
+      - "admin"
+      - "user"
+      - "role"
+      - "permission"
+      - "audit"
+      - "log"
+      - "config"
+      - "system"
+      - "backup"
+    external_apis:
+      - name: "user_management"
+        endpoint: "${EXTERNAL_API_BASE}/admin/users"
+        method: "GET"
+        description: "External user management system"
+
+# Routing Rules Configuration
+routing_rules:
+  # High priority domain-specific rules
+  - pattern: "(?i)\\b(sewadar|badge|profile|eligibility)\\b"
+    target_agent: "sewadar"
+    priority: 15
+    type: "regex"
+
+  - pattern: "(?i)\\b(department|section|unit|division)\\b"
+    target_agent: "department"
+    priority: 15
+    type: "regex"
+
+  - pattern: "(?i)\\b(attendance|present|absent|duty|schedule)\\b"
+    target_agent: "attendance"
+    priority: 15
+    type: "regex"
+
+  - pattern: "(?i)\\b(report|analytics|metrics|dashboard|summary)\\b"
+    target_agent: "reports"
+    priority: 12
+    type: "regex"
+
+  - pattern: "(?i)\\b(admin|user|role|permission|audit)\\b"
+    target_agent: "admin"
+    priority: 10
+    type: "regex"
+
+  # Cross-domain patterns (may require orchestration)
+  - pattern: "(?i)\\b(all|total|overall|complete|full)\\b.*\\b(report|summary)\\b"
+    target_agent: "reports"
+    priority: 20
+    type: "regex"
+    orchestration_hint: true
+
+  - pattern: "(?i)\\b(sewadar)\\b.*\\b(department|assignment)\\b"
+    target_agent: "orchestrator"
+    priority: 18
+    type: "regex"
+    involved_agents: ["sewadar", "department"]
+
+  - pattern: "(?i)\\b(attendance)\\b.*\\b(sewadar|department)\\b"
+    target_agent: "orchestrator"
+    priority: 18
+    type: "regex"
+    involved_agents: ["attendance", "sewadar", "department"]
+
+# Agent Communication Settings
+communication:
+  message_timeout: 30000  # 30 seconds
+  heartbeat_interval: 30000  # 30 seconds
+  max_retry_attempts: 3
+  retry_delay: 5000  # 5 seconds
+
+# Performance Settings
+performance:
+  query_timeout: 60000  # 60 seconds
+  max_parallel_agents: 5
+  result_cache_ttl: 300000  # 5 minutes
+  max_result_size: 10000  # Max records per agent
+
+# Security Settings
+security:
+  enable_query_validation: true
+  allowed_sql_operations: ["SELECT"]
+  enable_audit_logging: true
+  rate_limit_per_agent: 100  # requests per minute
+
+# Development Settings
+development:
+  debug_mode: true
+  log_level: "info"
+  enable_mock_apis: true
+  mock_delay: 1000  # milliseconds
