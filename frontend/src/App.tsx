@@ -4,13 +4,23 @@ import { CopilotChat } from "@copilotkit/react-ui";
 import "@copilotkit/react-ui/styles.css";
 import PostgresAgent from "./components/PostgresAgent";
 import ChartShowcase from "./components/ChartShowcase";
+import MultiAgentInterface from "./components/MultiAgentInterface";
 
 export default function ChatApp() {
-  const [activeView, setActiveView] = useState<'chat' | 'postgres' | 'charts'>('postgres');
+  const [activeView, setActiveView] = useState<'chat' | 'postgres' | 'charts' | 'multi-agent'>('multi-agent');
 
   return (
     <div className="h-screen w-screen flex flex-col">
       <nav className="bg-gray-800 text-white p-4 flex gap-4">
+        <button
+          onClick={() => setActiveView('multi-agent')}
+          className={`px-4 py-2 rounded ${activeView === 'multi-agent'
+            ? 'bg-blue-600'
+            : 'bg-gray-700 hover:bg-gray-600'
+            }`}
+        >
+          🚀 Multi-Agent System
+        </button>
         <button
           onClick={() => setActiveView('postgres')}
           className={`px-4 py-2 rounded ${activeView === 'postgres'
@@ -55,6 +65,8 @@ export default function ChatApp() {
           </CopilotKit>
         ) : activeView === 'charts' ? (
           <ChartShowcase />
+        ) : activeView === 'multi-agent' ? (
+          <MultiAgentInterface />
         ) : (
           <PostgresAgent />
         )}
